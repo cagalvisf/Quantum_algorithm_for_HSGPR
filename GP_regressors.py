@@ -52,17 +52,17 @@ class Gaussian_kernel_GPR():
         using the squared exponential kernel.
         """
         kernel = self.gaussian_kernel
-        X,y = self.data
+        x_train, y_train = self.data
         sigma2 = self.sigma2
         
-        Ksf = kernel(Xp,X)
-        Kff = kernel(X,X)
+        Ksf = kernel(Xp,x_train)
+        Kff = kernel(x_train,x_train)
         Kss = kernel(Xp,Xp)
 
         jitter = 1e-6
         
-        mu = Ksf @ np.linalg.inv(Kff + (jitter + sigma2)*np.identity(len(X))) @ y
-        Sigma = Kss - Ksf@np.linalg.inv(Kff + sigma2*np.identity(len(X)))@Ksf.T
+        mu = Ksf @ np.linalg.inv(Kff + (jitter + sigma2)*np.identity(len(x_train))) @ y_train
+        Sigma = Kss - Ksf@np.linalg.inv(Kff + sigma2*np.identity(len(x_train)))@Ksf.T
         
         return mu, Sigma
         
@@ -152,7 +152,7 @@ class LP_approx_GPR():
                 
         np.random.seed(123)
 
-        X,y = self.data
+        x_train, y_train = self.data
         sigma2 = self.sigma2
         alpha = self.alpha
         M = self.M
@@ -164,12 +164,12 @@ class LP_approx_GPR():
 
 
         phisf = self.Phi_matrix(Xp, samples)
-        Phif = self.Phi_matrix(X, samples)
+        Phif = self.Phi_matrix(x_train, samples)
         
         A = (alpha * Phif @ Phif.T + (jitter + M * sigma2) * np.identity(2 * M)) / alpha
 
         A_1 = np.linalg.inv(A)
-        mu = phisf.T @ A_1 @ Phif @ y
+        mu = phisf.T @ A_1 @ Phif @ y_train
         
         Var = sigma2 * phisf.T @ A_1 @ phisf
         
@@ -299,7 +299,7 @@ class HS_approx_GPR():
                 
         np.random.seed(123)
 
-        X,y = self.data
+        x_train, y_train = self.data
         sigma2 = self.sigma2
         M = self.M
         Phi_matrix = self.Phi_matrix
@@ -308,21 +308,19 @@ class HS_approx_GPR():
 
 
         phisf = Phi_matrix(Xp).T
-        Phif = Phi_matrix(X)
+        Phif = Phi_matrix(x_train)
 
 
         Lambda = self.Lambda()
-        Z = Phif@np.sqrt(Lambda)
-        Z_s = np.sqrt(Lambda)@phisf
+        X = Phif@np.sqrt(Lambda)
+        X_s = np.sqrt(Lambda)@phisf
         
-        y = y[:,None]
+        y_train = y_train[:,None]       
         
-        ev = np.linalg.eigvals(Phif.T @ Phif)        
-        
-        B = Z.T @ Z + (jitter +  sigma2)*np.identity(M)
+        B = X.T @ X + (jitter +  sigma2)*np.identity(M)
         B_1 = np.linalg.inv(B)
         
-        mu = Z_s.T @ B_1 @ Z.T @ y    
-        Var = sigma2 * Z_s.T @ B_1 @ Z_s
+        mu = X_s.T @ B_1 @ X.T @ y_train      
+        Var = sigma2 * X_s.T @ B_1 @ X_s
         
         return mu, Var

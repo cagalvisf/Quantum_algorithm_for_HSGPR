@@ -1,26 +1,26 @@
-import numpy as np
-import GP_regressors
-
 """
 Here we implement the necessary functions to build the circuit for Quantum Gaussian Process Regression 
-usin the Hilbert Space approximation of the kernel.
+using the Hilbert Space approximation of the kernel.
 """
 
-from qiskit import QuantumCircuit, QuantumRegister, ClassicalRegister, execute, transpile, Aer
+import numpy as np
+import GP_regressors
+import scipy
+from operator import itemgetter
+
+from qiskit import QuantumCircuit, QuantumRegister, ClassicalRegister, execute, Aer
 from qiskit.circuit.library import QFT
 from qiskit.circuit.library.standard_gates import RYGate
 from qiskit.circuit.library.data_preparation.state_preparation import StatePreparation
 from qiskit.extensions import HamiltonianGate
 from qiskit.quantum_info import Statevector as st
 
-import scipy
-
-from operator import itemgetter
-
 backend = Aer.get_backend("aer_simulator")
 
-## compare the similitud of two binary strings
 def compare_binary_strings(bin1, bin2):
+    """
+    This function compares two binary strings and returns the number of equal 1's.
+    """
     count = 0
     for i in range(len(bin1)):
         if (bin1[i]!= bin2[i]):
@@ -29,25 +29,32 @@ def compare_binary_strings(bin1, bin2):
             count += 1
     return count
 
-## Cleaning the repetitive eigenvalues
+## Build a function that compares two binary strings and returns the number of equal 1's
 def clean_binary(list_bin):
+    """
+    This function cleans the binary strings that are repeated in the list of binary strings.
+    """
     for i in range(0, len(list_bin)):
         for j in range(i+1, len(list_bin)):
-            if (compare_binary_strings(list_bin[i], list_bin[j]) >= 1):
+            if (compare_binary_strings(list_bin[i], list_bin[j]) >= 2):
                 list_bin[j] = str(0)*len(list_bin[0])
             if (list_bin[i] == str(0)*len(list_bin[0])):
                 break
-
+    
     list_bin = [i for i in list_bin if i != str("0")*len(list_bin[0])]
+    ## print the list of list_bin counts with its decimal value
 
     if (list_bin[-1] == str("0")*(len(list_bin[0])-1)+"1") and (list_bin[-2] == str("0")*(len(list_bin[0])-2) + "10"):
         list_bin = list_bin[:-1]
 
-    
     return list_bin
 
 ## Function to compute the main counts
 def main_counts(counts, n_eig):
+    """
+    This function returns the counts of the counts before the |0>^n_eig state
+    is measured.
+    """
     ## save the counts before str(0)*n_eig in a dictionary
     counts_main = {}
     for k in counts.keys():
@@ -58,16 +65,19 @@ def main_counts(counts, n_eig):
     
     return counts_main
 
-## Function to compute the eigenvalues
-def quantum_eigenvals(Z,
+def quantum_eigenvals(X,
                     M,
                     n_eig,
                     delta,
                     shots):
-    
-    ZZd = Z.T @ Z
 
-    psi = Z.flatten()
+    """
+    This function computes the eigenvalues of the matrix Z.T @ Z using quantum phase estimation algorithm.
+    In this case, the matrix Z.T @ Z is calculated using the Hilbert Space approximation of the kernel.
+    """    
+    XXd = X.T @ X
+
+    psi = X.flatten()
     psi_vector = st(psi)
     psi_gate = StatePreparation(psi_vector)
 
@@ -89,8 +99,8 @@ def quantum_eigenvals(Z,
     for i in range(n_eig):
         QPE_circuit.h(eigen[i])
 
-    ## Evolution operatot for Z.T @ Z
-    U = HamiltonianGate(-ZZd, T)
+    ## Evolution operatot for X.T @ X
+    U = HamiltonianGate(-XXd, T)
     U.name = "U"
 
     ## Controlled operations for quantum phase estimation
@@ -111,10 +121,6 @@ def quantum_eigenvals(Z,
     ## Circuit to measure the eigenvalues
     ## Creation of classical registers
     cr = ClassicalRegister(n_eig,'c')
-    ## Optimization of the circuit
-
-    #transpiled_circuit = transpile(QPE_circuit, backend=backend, optimization_level=0)
-    #QPE_circuit = transpiled_circuit
 
     ## Circuit intialization
     circuit_measure = QuantumCircuit(eigen, psi_1, cr)
@@ -133,7 +139,6 @@ def quantum_eigenvals(Z,
     counts = result.get_counts(circuit_measure)
 
     sort_counts= dict(sorted(counts.items(), key=itemgetter(1), reverse=True))
-
     
     ## main counts
     counts_main = main_counts(sort_counts, n_eig)
@@ -144,7 +149,6 @@ def quantum_eigenvals(Z,
     ## if lenght of theta_bin bigger than M, just take the first M elements
     if len(theta_bin) > M:
         theta_bin = theta_bin[:M]
-        
 
     eigenvals_quantum = []
     for j in range(0,len(theta_bin)):
@@ -152,13 +156,9 @@ def quantum_eigenvals(Z,
         zeta=(int(theta_bin[j],2)/(2**n_eig))*(2*np.pi/T)
         
         eigenvals_quantum.append(zeta)
-        
-        #print("Eigenvalue qPU: ", zeta)
-        #print("C:", C)
-        #print("infint: ",2*np.arcsin(C/(zeta)))
+
     eigenvals_quantum = np.array(eigenvals_quantum)
         
-        #print("Eigenvalue qPU: ", zeta)
     ## create a dictionary with the binary strings as key and the eigenvalues as values
     eigenvals_dict = dict(zip(theta_bin, eigenvals_quantum))
     ## sort the dictionary by the eigenvalues in ascending order
@@ -167,12 +167,16 @@ def quantum_eigenvals(Z,
     return eigenvals_dict, QPE_circuit
 
 ## Function to compute the mean of the posterior distribution
-def mean_QGPR_approximation_posterior(Phisf, Y, Lambda, Z, sigma2, q_eigen_dict, QPE_circuit, n_eig, R, shots=2**5):
+def mean_QGPR_approximation_posterior(Phisf, Y, Lambda, X, sigma2, q_eigen_dict, QPE_circuit, n_eig, R, shots=2**5):
+    """
+    This function computes the mean of the posterior distribution of f evaluated at each of the points in Xp conditioned on (X, y)
+    using the quantum Gaussian Process Regression with the Hilbert Space approximation of the kernel.
+    """
     backend = Aer.get_backend("aer_simulator")
-    Zs =np.array(Phisf.T @ np.sqrt(Lambda))
+    Xs =np.array(Phisf.T @ np.sqrt(Lambda))
 
     ## Mean calculation
-    psi_1 = Z.flatten()
+    psi_1 = X.flatten()
     psi_1_vector = st(psi_1)
     psi_1_gate = StatePreparation(psi_1_vector)
 
@@ -205,12 +209,8 @@ def mean_QGPR_approximation_posterior(Phisf, Y, Lambda, Z, sigma2, q_eigen_dict,
 
         zeta=quantum_eigvals[j]
 
-        #print(zeta)
-        #print(C/(zeta + sigma2))
-
-        ##one_positions = [i for i, digit in enumerate(binary_string[::-1]) if digit == "1"]
         one_positions = [i for i, digit in enumerate(binary_string[::-1]) if digit == "1"]
-        ##print(one_positions)
+
         cry=RYGate(2*np.arcsin(C/(zeta + sigma2))).control(count_ones)
 
         control_qubits = [eigen_qr[i] for i in one_positions]
@@ -219,13 +219,11 @@ def mean_QGPR_approximation_posterior(Phisf, Y, Lambda, Z, sigma2, q_eigen_dict,
 
     qc_psi_1.append(QPE_circuit.inverse(), eigen_qr[:] + psi_1_qr[:])
 
-    ## optimization of the circuit
-    #transpiled_circuit = transpile(qc_psi_1, backend=backend, optimization_level=0)
-    #qc_psi_1 = transpiled_circuit
 
     Hadamard_circuit1 = qc_psi_1.decompose().to_gate().control(1, ctrl_state='0')
 
-    Phi2=np.kron(Y, Zs)
+    ## circuit for the estimation in the new point X_*
+    Phi2=np.kron(Y, Xs)
     Phi2_norm=np.linalg.norm(Phi2)
     Phi2=Phi2/Phi2_norm
     PSI2 = Phi2.flatten()
@@ -259,34 +257,28 @@ def mean_QGPR_approximation_posterior(Phisf, Y, Lambda, Z, sigma2, q_eigen_dict,
     qc_h.append(Hadamard_circuit2, ancilla_h2[:] + ancilla_h[:] + eigen_h[:] + psi_h[:])
     qc_h.h(ancilla_h2)
 
-    ## optimization of the circuit
-    #transpiled_circuit = transpile(qc_h, backend=backend, optimization_level=3)
-    #qc_h = transpiled_circuit
-
     qc_h.measure(ancilla_h2, cr)
 
-     
     backend = Aer.get_backend("aer_simulator")
     job_ht = execute(qc_h, backend, shots=shots)
     result_ht = job_ht.result()
     counts_ht = result_ht.get_counts(qc_h)
 
     Exp = 0
-    print(counts_ht)
     prob_0 = counts_ht['0']/shots 
     Exp = 2*prob_0 - 1
     mean_sim = (Exp/C)*Phi2_norm
 
     return mean_sim
 
-def var_QGPR_approximation_posterior(Phisf, Lambda, Z, sigma2, q_eigen_dict, QPE_circuit, n_eig, R, M, shots=2**14):
+def var_QGPR_approximation_posterior(Phisf, Lambda, X, sigma2, q_eigen_dict, QPE_circuit, n_eig, R, M, shots=2**14):
     
-    Zs =np.array(Phisf.T @ np.sqrt(Lambda))
+    Xs =np.array(Phisf.T @ np.sqrt(Lambda))
     theta_bin = [*q_eigen_dict.keys()]
     quantum_eigvals = [*q_eigen_dict.values()]
 
     ## Mean calculation
-    psi_1 = Z.flatten()
+    psi_1 = X.flatten()
     psi_1_vector = st(psi_1)
     psi_1_gate = StatePreparation(psi_1_vector)
 
@@ -304,7 +296,7 @@ def var_QGPR_approximation_posterior(Phisf, Lambda, Z, sigma2, q_eigen_dict, QPE
     cr_s = ClassicalRegister(1, "c_s")
     
 
-    Phi2=Zs.T
+    Phi2=Xs.T
     Phi2_norm=np.linalg.norm(Phi2)
     Phi2=Phi2/Phi2_norm
     PSI2 = Phi2.flatten()
@@ -321,6 +313,7 @@ def var_QGPR_approximation_posterior(Phisf, Lambda, Z, sigma2, q_eigen_dict, QPE
     ## initialize the psi register in the state psi
     qc_swap.append(psi_1_gate, psi_1_qr)
     qc_swap.append(phis_y_gate, psi_2_qr)
+
     ## Apply QPE_ciruit to the registers psi_1 and eigen
     qc_swap.append(QPE_circuit, eigen_qr[:] + psi_1_qr[:])
 
@@ -332,8 +325,6 @@ def var_QGPR_approximation_posterior(Phisf, Lambda, Z, sigma2, q_eigen_dict, QPE
 
         zeta=quantum_eigvals[j]
         P_1=P_1+(1/(zeta+sigma2))
-        #print(zeta)
-        #print(C/(zeta + sigma2))
 
         one_positions = [i for i, digit in enumerate(binary_string[::-1]) if digit == "1"]
         cry=RYGate(2*np.arcsin(C/np.sqrt(zeta*(zeta + sigma2)))).control(count_ones)
@@ -341,8 +332,6 @@ def var_QGPR_approximation_posterior(Phisf, Lambda, Z, sigma2, q_eigen_dict, QPE
         control_qubits = [eigen_qr[i] for i in one_positions]
         target_qubit = ancilla_r
         qc_swap.append(cry, control_qubits+[target_qubit] )
-
-    
 
     qc_swap.append(QPE_circuit.inverse(), eigen_qr[:] + psi_1_qr[:])
 
@@ -358,16 +347,14 @@ def var_QGPR_approximation_posterior(Phisf, Lambda, Z, sigma2, q_eigen_dict, QPE
     job_st = execute(qc_swap, backend, shots=shots)
     result_st = job_st.result()
     counts_st = result_st.get_counts(qc_swap)
-    
-    print(counts_st)
 
     prob_11 = counts_st['1 1']/shots 
     var = (P_1 - 2*prob_11/C**2)*Phi2_norm**2
-    return var ,qc_swap
+    return var
 
 def QGPR_approximation_posterior(Xp, mean_args):
-    X = mean_args[0]
-    Y = mean_args[1]
+    x_train = mean_args[0]
+    y_train = mean_args[1]
     sigma2 = mean_args[2]
     M = mean_args[3]
     L = mean_args[4]
@@ -378,46 +365,47 @@ def QGPR_approximation_posterior(Xp, mean_args):
     R = mean_args[9]
     shots = mean_args[10]
 
-    HS = GP_regressors.HS_approx_GPR((X, Y),
+    HS = GP_regressors.HS_approx_GPR((x_train, y_train),
                    sigma2=sigma2,
                    M = M,
                    L = L,
                    alpha=alpha,
                    scale=scale)
 
-    Phif = HS.Phi_matrix(X)
+    Phif = HS.Phi_matrix(x_train)
     Lambda = HS.Lambda()
     
-    Z = np.array(Phif @ np.sqrt(Lambda))
+    X = np.array(Phif @ np.sqrt(Lambda))
 
     ## Normalize the data
-    norm_z = np.linalg.norm(Z)
+    norm_X = np.linalg.norm(X)
 
-    Z_norm = Z/norm_z
+    X_norm = X/norm_X
 
-    ZZd = np.array(Z_norm.T @ Z_norm)
+    XXd = np.array(X_norm.T @ X_norm)
 
-    ## For demonstration, we calculate the eigenvalues of ZZd and chose delta based on that
-    real_eigenvals, real_eigenvecs = scipy.linalg.eig(ZZd)
+    ## For demonstration, we calculate the eigenvalues of XXd and chose delta based on that
+    real_eigenvals, real_eigenvecs = scipy.linalg.eig(XXd)
 
     ## delta parameter should be 1>delta>lam_max
-    q_eigen_dict, QPE_circuit = quantum_eigenvals(Z_norm, M, n_eig, delta, shots)
+    q_eigen_dict, QPE_circuit = quantum_eigenvals(X_norm, M, n_eig, delta, shots)
 
+    ## printing the real and quantum eigenvalues to verify that they are similar
     print("Real eigenvalues: ", real_eigenvals)
     print("Quantum eigenvalues: ", [*q_eigen_dict.values()])
-
 
     mu = []
     var = []
     i=0
+
     ## Parameters
     for xp in Xp:
         Phisf = HS.Phi_matrix([xp]).T
                 
-        mu.append(mean_QGPR_approximation_posterior(Phisf, Y, Lambda, Z_norm, sigma2, q_eigen_dict, QPE_circuit, n_eig, R,  shots))
+        mu.append(mean_QGPR_approximation_posterior(Phisf, y_train, Lambda, X_norm, sigma2, q_eigen_dict, QPE_circuit, n_eig, R,  shots))
 
-        v, v_qc = var_QGPR_approximation_posterior(Phisf, Lambda, Z_norm, sigma2, q_eigen_dict, QPE_circuit, n_eig, R, M, shots)
+        v = var_QGPR_approximation_posterior(Phisf, Lambda, X_norm, sigma2, q_eigen_dict, QPE_circuit, n_eig, R, M, shots)
         var.append(np.abs(v))
         i+=1
         print("Point: ", i, " of ", len(Xp), " done.")
-    return np.array(mu)/norm_z, sigma2*np.array(var)/norm_z**2, v_qc
+    return np.array(mu)/norm_X, sigma2*np.array(var)/norm_X**2
