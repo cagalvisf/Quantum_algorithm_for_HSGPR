@@ -21,31 +21,41 @@ def compare_binary_strings(bin1, bin2):
     """
     This function compares two binary strings and returns the number of equal 1's.
     """
-    count = 0
-    for i in range(len(bin1)):
-        if (bin1[i]!= bin2[i]):
-            break
-        if (bin1[i]=="1"):
-            count += 1
-    return count
+
+    if len(bin1) != len(bin2):
+        raise ValueError("The binary strings have different length.")
+    
+    ## transform the binary strings into decimal numbers
+    dec1 = int(bin1,2)/2**len(bin1)
+    dec2 = int(bin2,2)/2**len(bin2)
+
+    ## avoid problems with the case when both binary strings are 0
+    if (dec1 == 0) and (dec2 == 0):
+        similarity = 1
+    else:
+        similarity = 1 - abs(dec1 - dec2)/max([dec1, dec2])
+    
+    return similarity
 
 ## Build a function that compares two binary strings and returns the number of equal 1's
 def clean_binary(list_bin):
     """
-    This function cleans the binary strings that are repeated in the list of binary strings.
+    This function cleans the binary strings that are repeated in the list.
     """
+    
+    treshold = 0.8
+
     for i in range(0, len(list_bin)):
         for j in range(i+1, len(list_bin)):
-            if (compare_binary_strings(list_bin[i], list_bin[j]) >= 2):
+            ## continue if one of the binary strings is 0
+            if (list_bin[i] == str(0)*len(list_bin[0])) or (list_bin[j] == str(0)*len(list_bin[0])):
+                continue
+            if (compare_binary_strings(list_bin[i], list_bin[j]) >= treshold):
+                ## delete list item if the similarity is bigger than the treshold
                 list_bin[j] = str(0)*len(list_bin[0])
-            if (list_bin[i] == str(0)*len(list_bin[0])):
-                break
-    
-    list_bin = [i for i in list_bin if i != str("0")*len(list_bin[0])]
-    ## print the list of list_bin counts with its decimal value
 
-    if (list_bin[-1] == str("0")*(len(list_bin[0])-1)+"1") and (list_bin[-2] == str("0")*(len(list_bin[0])-2) + "10"):
-        list_bin = list_bin[:-1]
+
+    list_bin = [i for i in list_bin if i != str("0")*len(list_bin[0])]
 
     return list_bin
 
@@ -140,15 +150,19 @@ def quantum_eigenvals(X,
 
     sort_counts= dict(sorted(counts.items(), key=itemgetter(1), reverse=True))
     
-    ## main counts
+    ## main counts takes exited states that have larger counts than the |0>^n_eig state
     counts_main = main_counts(sort_counts, n_eig)
 
     theta_bin=[*counts_main.keys()]
     theta_bin = clean_binary(theta_bin)
 
-    ## if lenght of theta_bin bigger than M, just take the first M elements
     if len(theta_bin) > M:
         theta_bin = theta_bin[:M]
+
+    ## if lenght of theta_bin smaller than M, add the smallest possible string to the list
+    ## this fix the problem of the last eigenvalue being too small so n_eig bits are not enough to represent it
+    if len(theta_bin) < M:
+        theta_bin.append(str(0)*(n_eig-1) + str(1))
 
     eigenvals_quantum = []
     for j in range(0,len(theta_bin)):
@@ -161,6 +175,7 @@ def quantum_eigenvals(X,
         
     ## create a dictionary with the binary strings as key and the eigenvalues as values
     eigenvals_dict = dict(zip(theta_bin, eigenvals_quantum))
+
     ## sort the dictionary by the eigenvalues in ascending order
     eigenvals_dict = dict(sorted(eigenvals_dict.items(), key=itemgetter(1), reverse=True))
 
@@ -386,7 +401,8 @@ def QGPR_approximation_posterior(Xp, mean_args):
 
     ## For demonstration, we calculate the eigenvalues of XXd and chose delta based on that
     real_eigenvals, real_eigenvecs = scipy.linalg.eig(XXd)
-
+    real_eigenvals = np.sort(real_eigenvals)[::-1]
+    
     ## delta parameter should be 1>delta>lam_max
     q_eigen_dict, QPE_circuit = quantum_eigenvals(X_norm, M, n_eig, delta, shots)
 
